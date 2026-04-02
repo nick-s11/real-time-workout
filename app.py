@@ -60,59 +60,49 @@ async def join_workout(session_id: str, user: str):
     if user not in participants[session_id]:
         participants[session_id].append(user)
 
-    # Broadcast updated participant list
     for conn in connections.get(session_id, []):
         await conn.send_json({"type": "participants", "data": participants[session_id]})
-    
     return {"participants": participants[session_id]}
 
 @app.get("/workouts/{session_id}")
 def get_workout(session_id: str):
     with Session(engine) as session:
-        # Check if session exists
-        stmt = select(WorkoutSession).where(WorkoutSession.session_id == session_id)
-        db_session = session.exec(stmt).first()
-        if not db_session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        exercises = session.exec(select(Exercise).where(Exercise.session_id == session_id)).all()
+    return {"exercises": exercises}
 
-        exercises = session.exec(
-            select(Exercise).where(Exercise.session_id == session_id)
-        ).all()
-    return {"session": db_session, "exercises": exercises}
+@app.get("/history")
+def get_all_sessions():
+    with Session(engine) as session:
+        # Returns all sessions, newest first
+        sessions = session.exec(select(WorkoutSession).order_by(WorkoutSession.created_at.desc())).all()
+    return {"sessions": sessions}
 
 @app.post("/workouts/{session_id}/log", status_code=201)
 async def log_exercise(session_id: str, exercise: Exercise):
-    # Set the session ID from URL to the exercise object
     exercise.session_id = session_id
-    
     with Session(engine) as session:
         session.add(exercise)
         session.commit()
         session.refresh(exercise)
 
-    # Broadcast update
     if session_id in connections:
         for conn in connections[session_id]:
             await conn.send_json(exercise.model_dump())
-    
     return exercise
 
 @app.delete("/workouts/{session_id}")
-def delete_workout(session_id: str):
+def archive_workout(session_id: str):
     with Session(engine) as session:
         db_session = session.get(WorkoutSession, session_id)
         if not db_session:
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        # We can either delete or just set active=False per requirements
-        session.delete(db_session)
+            raise HTTPException(status_code=404, detail="Not found")
+        db_session.active = False # Archive instead of hard delete
+        session.add(db_session)
         session.commit()
     
-    # Cleanup memory
     connections.pop(session_id, None)
     participants.pop(session_id, None)
-    
-    return {"message": "Session ended and deleted"}
+    return {"message": "Session archived"}
 
 # -----------------------
 # WEBSOCKET
@@ -122,11 +112,7 @@ def delete_workout(session_id: str):
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
     connections.setdefault(session_id, []).append(websocket)
-
-    await websocket.send_json({
-        "type": "participants",
-        "data": participants.get(session_id, [])
-    })
+    await websocket.send_json({"type": "participants", "data": participants.get(session_id, [])})
 
     try:
         while True:
@@ -135,7 +121,4 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         if session_id in connections:
             connections[session_id].remove(websocket)
 
-# -----------------------
-# STATIC FILES (Last)
-# -----------------------
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

@@ -3,34 +3,38 @@
 <head>
     <title>Workout Logger</title>
     <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f7f6; padding: 20px; }
-        .card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        input, button, select { padding: 10px; margin: 5px; border-radius: 5px; border: 1px solid #ddd; }
-        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
-        .btn-danger { background: #dc3545; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f0f2f5; padding: 20px; color: #1c1e21; }
+        .card { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        input, button, select { padding: 12px; margin: 5px; border-radius: 8px; border: 1px solid #ddd; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: 600; transition: 0.2s; }
+        button:hover { background: #0056b3; }
+        .btn-danger { background: #fa3e3e; }
+        .btn-history { background: #42b72a; margin-top: 10px; }
         ul { list-style: none; padding: 0; }
-        li { background: #fff; border-left: 5px solid #007bff; padding: 10px; margin: 10px 0; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .participants { display: flex; gap: 10px; margin-top: 10px; }
-        .user-tag { background: #e7f3ff; color: #007bff; padding: 5px 12px; border-radius: 20px; font-weight: bold; }
+        li { background: #f8f9fa; border-left: 5px solid #007bff; padding: 15px; margin: 10px 0; border-radius: 6px; }
+        .history-item { border-left-color: #42b72a; cursor: pointer; }
+        .history-item:hover { background: #eefdf0; }
+        .participants { display: flex; gap: 8px; flex-wrap: wrap; }
+        .user-tag { background: #e7f3ff; color: #007bff; padding: 6px 15px; border-radius: 20px; font-size: 0.9em; font-weight: bold; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
 
-    <h2>🏋️ Live Workout Logger</h2>
+    <h2> Workout Tracker</h2>
 
     <div class="card">
         <button onclick="createSession()">Create New Session</button>
         <hr>
         <input id="username" placeholder="Your Name">
         <input id="sessionInput" placeholder="Session ID">
-        <button onclick="joinSession()">Join Session</button>
-        <button onclick="endSession()" class="btn-danger">End Session</button>
-        <p>Active Session: <b id="sessionIdDisplay">None</b></p>
+        <button onclick="joinSession()">Join Live</button>
+        <button onclick="endSession()" class="btn-danger">Archive Session</button>
+        <p>Active ID: <b id="sessionIdDisplay">None</b></p>
     </div>
 
     <div class="card">
-        <h3>Live Participants</h3>
+        <h3>Participants</h3>
         <div id="participants" class="participants"></div>
     </div>
 
@@ -40,21 +44,18 @@
             <option value="lifting">Weight Lifting</option>
             <option value="cardio">Cardio</option>
         </select>
-
         <div id="liftingFields">
             <input id="exercise" placeholder="Exercise Name">
             <input id="sets" type="number" placeholder="Sets">
             <input id="reps" type="number" placeholder="Reps">
-            <input id="weight" type="number" placeholder="Weight (lbs)">
+            <input id="weight" type="number" placeholder="Lbs">
         </div>
-
         <div id="cardioFields" class="hidden">
             <input id="exerciseCardio" placeholder="Activity">
             <input id="distance" type="number" step="0.1" placeholder="Miles">
             <input id="time" type="number" placeholder="Minutes">
         </div>
-
-        <button onclick="logExercise()" style="width: 100%; margin-top: 10px;">Broadcast to Partners</button>
+        <button onclick="logExercise()" style="width: 100%; margin-top: 15px;">Log to Feed</button>
     </div>
 
     <div class="card">
@@ -62,9 +63,17 @@
         <ul id="log"></ul>
     </div>
 
+    <div class="card">
+        <h3>Past Workouts</h3>
+        <button onclick="loadGlobalHistory()" class="btn-history">Refresh List</button>
+        <ul id="pastSessionsList"></ul>
+    </div>
+
 <script>
 let sessionId = "";
 let socket;
+
+window.onload = loadGlobalHistory;
 
 function toggleFields() {
     const type = document.getElementById("type").value;
@@ -78,12 +87,13 @@ async function createSession() {
     sessionId = data.session_id;
     document.getElementById("sessionIdDisplay").innerText = sessionId;
     document.getElementById("sessionInput").value = sessionId;
+    loadGlobalHistory();
 }
 
 async function joinSession() {
-    const user = document.getElementById("username").value;
+    const user = document.getElementById("username").value || "Anonymous";
     sessionId = document.getElementById("sessionInput").value;
-    if(!user || !sessionId) return alert("Missing name or ID");
+    if(!sessionId) return alert("Enter a Session ID");
 
     document.getElementById("sessionIdDisplay").innerText = sessionId;
     await fetch(`/workouts/${sessionId}/join?user=${user}`, { method: "POST" });
@@ -93,37 +103,33 @@ async function joinSession() {
 }
 
 function connectWS() {
+    if(socket) socket.close();
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     socket = new WebSocket(`${protocol}://${location.host}/ws/workout/${sessionId}`);
 
     socket.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "participants") {
-            updateParticipants(msg.data);
+            document.getElementById("participants").innerHTML = msg.data.map(u => `<span class="user-tag">${u}</span>`).join("");
         } else {
             renderEntry(msg);
         }
     };
 }
 
-function updateParticipants(users) {
-    const container = document.getElementById("participants");
-    container.innerHTML = users.map(u => `<span class="user-tag">${u}</span>`).join("");
-}
-
 function renderEntry(ex) {
     const li = document.createElement("li");
     li.innerHTML = ex.type === "lifting" 
-        ? `<b>${ex.user}</b>: ${ex.name} - ${ex.weight}lbs (${ex.sets}x${ex.reps})`
-        : `<b>${ex.user}</b>: ${ex.name} - ${ex.distance} miles in ${ex.time} min`;
+        ? `<b>${ex.user}</b> logged <b>${ex.name}</b>: ${ex.weight}lbs (${ex.sets}x${ex.reps})`
+        : `<b>${ex.user}</b> logged <b>${ex.name}</b>: ${ex.distance} miles in ${ex.time} min`;
     document.getElementById("log").prepend(li);
 }
 
 async function logExercise() {
-    const user = document.getElementById("username").value;
+    const user = document.getElementById("username").value || "Anonymous";
     const type = document.getElementById("type").value;
-    
     let payload = { type, user, session_id: sessionId };
+    
     if (type === "lifting") {
         payload.name = document.getElementById("exercise").value;
         payload.sets = parseInt(document.getElementById("sets").value) || 0;
@@ -149,8 +155,26 @@ async function loadHistory() {
     data.exercises.forEach(renderEntry);
 }
 
+async function loadGlobalHistory() {
+    const res = await fetch("/history");
+    const data = await res.json();
+    const list = document.getElementById("pastSessionsList");
+    list.innerHTML = "";
+    data.sessions.forEach(sess => {
+        const li = document.createElement("li");
+        li.className = "history-item";
+        const date = new Date(sess.created_at).toLocaleString();
+        li.innerHTML = `<strong>ID: ${sess.session_id}</strong> - ${date}`;
+        li.onclick = () => {
+            document.getElementById("sessionInput").value = sess.session_id;
+            joinSession();
+        };
+        list.appendChild(li);
+    });
+}
+
 async function endSession() {
-    if(!sessionId || !confirm("End workout and delete data?")) return;
+    if(!sessionId || !confirm("Archive this workout?")) return;
     await fetch(`/workouts/${sessionId}`, { method: "DELETE" });
     location.reload(); 
 }
