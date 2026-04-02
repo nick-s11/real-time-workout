@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Workout Logger</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f7f6; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        input, button, select { padding: 10px; margin: 5px; border-radius: 5px; border: 1px solid #ddd; }
+        button { background: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
+        .btn-danger { background: #dc3545; }
+        ul { list-style: none; padding: 0; }
+        li { background: #fff; border-left: 5px solid #007bff; padding: 10px; margin: 10px 0; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .participants { display: flex; gap: 10px; margin-top: 10px; }
+        .user-tag { background: #e7f3ff; color: #007bff; padding: 5px 12px; border-radius: 20px; font-weight: bold; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>🏋️ Live Workout Logger</h2>
+
+    <div class="card">
+        <button onclick="createSession()">Create New Session</button>
+        <hr>
+        <input id="username" placeholder="Your Name">
+        <input id="sessionInput" placeholder="Session ID">
+        <button onclick="joinSession()">Join Session</button>
+        <button onclick="endSession()" class="btn-danger">End Session</button>
+        <p>Active Session: <b id="sessionIdDisplay">None</b></p>
+    </div>
+
+    <div class="card">
+        <h3>Live Participants</h3>
+        <div id="participants" class="participants"></div>
+    </div>
+
+    <div class="card">
+        <h3>Log Exercise</h3>
+        <select id="type" onchange="toggleFields()">
+            <option value="lifting">Weight Lifting</option>
+            <option value="cardio">Cardio</option>
+        </select>
+
+        <div id="liftingFields">
+            <input id="exercise" placeholder="Exercise Name">
+            <input id="sets" type="number" placeholder="Sets">
+            <input id="reps" type="number" placeholder="Reps">
+            <input id="weight" type="number" placeholder="Weight (lbs)">
+        </div>
+
+        <div id="cardioFields" class="hidden">
+            <input id="exerciseCardio" placeholder="Activity">
+            <input id="distance" type="number" step="0.1" placeholder="Miles">
+            <input id="time" type="number" placeholder="Minutes">
+        </div>
+
+        <button onclick="logExercise()" style="width: 100%; margin-top: 10px;">Broadcast to Partners</button>
+    </div>
+
+    <div class="card">
+        <h3>Live Feed</h3>
+        <ul id="log"></ul>
+    </div>
+
+<script>
+let sessionId = "";
+let socket;
+
+function toggleFields() {
+    const type = document.getElementById("type").value;
+    document.getElementById("liftingFields").classList.toggle("hidden", type !== "lifting");
+    document.getElementById("cardioFields").classList.toggle("hidden", type !== "cardio");
+}
+
+async function createSession() {
+    const res = await fetch("/workouts", { method: "POST" });
+    const data = await res.json();
+    sessionId = data.session_id;
+    document.getElementById("sessionIdDisplay").innerText = sessionId;
+    document.getElementById("sessionInput").value = sessionId;
+}
+
+async function joinSession() {
+    const user = document.getElementById("username").value;
+    sessionId = document.getElementById("sessionInput").value;
+    if(!user || !sessionId) return alert("Missing name or ID");
+
+    document.getElementById("sessionIdDisplay").innerText = sessionId;
+    await fetch(`/workouts/${sessionId}/join?user=${user}`, { method: "POST" });
+
+    connectWS();
+    loadHistory();
+}
+
+function connectWS() {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    socket = new WebSocket(`${protocol}://${location.host}/ws/workout/${sessionId}`);
+
+    socket.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "participants") {
+            updateParticipants(msg.data);
+        } else {
+            renderEntry(msg);
+        }
+    };
+}
+
+function updateParticipants(users) {
+    const container = document.getElementById("participants");
+    container.innerHTML = users.map(u => `<span class="user-tag">${u}</span>`).join("");
+}
+
+function renderEntry(ex) {
+    const li = document.createElement("li");
+    li.innerHTML = ex.type === "lifting" 
+        ? `<b>${ex.user}</b>: ${ex.name} - ${ex.weight}lbs (${ex.sets}x${ex.reps})`
+        : `<b>${ex.user}</b>: ${ex.name} - ${ex.distance} miles in ${ex.time} min`;
+    document.getElementById("log").prepend(li);
+}
+
+async function logExercise() {
+    const user = document.getElementById("username").value;
+    const type = document.getElementById("type").value;
+    
+    let payload = { type, user, session_id: sessionId };
+    if (type === "lifting") {
+        payload.name = document.getElementById("exercise").value;
+        payload.sets = parseInt(document.getElementById("sets").value) || 0;
+        payload.reps = parseInt(document.getElementById("reps").value) || 0;
+        payload.weight = parseFloat(document.getElementById("weight").value) || 0;
+    } else {
+        payload.name = document.getElementById("exerciseCardio").value;
+        payload.distance = parseFloat(document.getElementById("distance").value) || 0;
+        payload.time = parseFloat(document.getElementById("time").value) || 0;
+    }
+
+    await fetch(`/workouts/${sessionId}/log`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+    });
+}
+
+async function loadHistory() {
+    const res = await fetch(`/workouts/${sessionId}`);
+    const data = await res.json();
+    document.getElementById("log").innerHTML = "";
+    data.exercises.forEach(renderEntry);
+}
+
+async function endSession() {
+    if(!sessionId || !confirm("End workout and delete data?")) return;
+    await fetch(`/workouts/${sessionId}`, { method: "DELETE" });
+    location.reload(); 
+}
+</script>
+</body>
+</html>
