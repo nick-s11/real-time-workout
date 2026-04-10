@@ -7,8 +7,7 @@ import uuid
 
 app = FastAPI()
 
-
-# DATABASE
+# database
 engine = create_engine("sqlite:///database.db")
 
 # Models
@@ -19,7 +18,7 @@ class WorkoutSession(SQLModel, table=True):
 
 class Exercise(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    type: str  # "lifting" or "cardio"
+    type: str 
     name: str
     sets: int = 0
     reps: int = 0
@@ -32,13 +31,12 @@ class Exercise(SQLModel, table=True):
 
 SQLModel.metadata.create_all(engine)
 
-
-# REAL TIME STORAGE
+# Realtime updates 
 connections: Dict[str, List[WebSocket]] = {}
 participants: Dict[str, List[str]] = {}
 
 
-#ROUTES
+#Routes
 @app.post("/workouts", status_code=201)
 def create_workout():
     session_id = str(uuid.uuid4())[:8]
@@ -93,7 +91,7 @@ def archive_workout(session_id: str):
         db_session = session.get(WorkoutSession, session_id)
         if not db_session:
             raise HTTPException(status_code=404, detail="Not found")
-        db_session.active = False # Archive instead of hard delete
+        db_session.active = False # Archive
         session.add(db_session)
         session.commit()
     
@@ -101,8 +99,7 @@ def archive_workout(session_id: str):
     participants.pop(session_id, None)
     return {"message": "Session archived"}
 
-
-# WEBSOCKET
+# Websocket config
 @app.websocket("/ws/workout/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.accept()
