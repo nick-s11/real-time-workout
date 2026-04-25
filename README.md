@@ -69,8 +69,8 @@ Then open the app in your browser at `http://127.0.0.1:8000`.
 ## API Endpoints
 
 - `POST /workouts` - Create a new workout session.
-- `POST /workouts/{session_id}/join?user=Name` - Join a session.
-- `GET /workouts/{session_id}` - Fetch exercises for a session.
+- `POST /workouts/{session_id}/join` - Join a session with JSON body `{ "name": "User" }`.
+- `GET /workouts/{session_id}` - Fetch session details, participants, and exercises.
 - `POST /workouts/{session_id}/log` - Add an exercise entry.
 - `DELETE /workouts/{session_id}` - Archive a session.
 - `GET /history` - List all workout sessions.
@@ -80,7 +80,15 @@ Then open the app in your browser at `http://127.0.0.1:8000`.
 
 The app uses a local SQLite database file at `database.db`. Tables are created automatically on startup.
 
+Core tables:
+
+- `user` - Persistent users by name.
+- `workoutsession` - Session metadata and active flag.
+- `sessionparticipant` - Join table linking users to sessions.
+- `exercise` - Logged exercise entries.
+
 ## Notes
 
 - The frontend is intentionally simple and self-contained.
 - Archived sessions stay in history, but live connections are cleared when a session is archived.
+- The WebSocket client automatically retries with backoff and re-joins on reconnect.

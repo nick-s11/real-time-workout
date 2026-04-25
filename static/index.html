@@ -72,6 +72,10 @@
 <script>
 let sessionId = "";
 let socket;
+let currentUser = "";
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+let shouldReconnect = false;
 
 window.onload = loadGlobalHistory;
 
@@ -91,30 +95,88 @@ async function createSession() {
 }
 
 async function joinSession() {
-    const user = document.getElementById("username").value || "Anonymous";
+    const user = (document.getElementById("username").value || "Anonymous").trim();
     sessionId = document.getElementById("sessionInput").value;
     if(!sessionId) return alert("Enter a Session ID");
+    currentUser = user;
 
     document.getElementById("sessionIdDisplay").innerText = sessionId;
-    await fetch(`/workouts/${sessionId}/join?user=${user}`, { method: "POST" });
+    const response = await fetch(`/workouts/${sessionId}/join`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ name: user })
+    });
+
+    if (!response.ok) {
+        const details = await response.json().catch(() => ({}));
+        alert(details.detail || "Could not join this session");
+        return;
+    }
 
     connectWS();
     loadHistory();
 }
 
 function connectWS() {
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    shouldReconnect = true;
     if(socket) socket.close();
+
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     socket = new WebSocket(`${protocol}://${location.host}/ws/workout/${sessionId}`);
+
+    socket.onopen = () => {
+        reconnectAttempts = 0;
+    };
 
     socket.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "participants") {
             document.getElementById("participants").innerHTML = msg.data.map(u => `<span class="user-tag">${u}</span>`).join("");
+        } else if (msg.type === "error") {
+            alert(msg.detail || "Connection closed");
         } else {
             renderEntry(msg);
         }
     };
+
+    socket.onclose = async () => {
+        if (!shouldReconnect || !sessionId) return;
+
+        const exists = await sessionExists(sessionId);
+        if (!exists) {
+            shouldReconnect = false;
+            return;
+        }
+
+        const delay = Math.min(10000, 1000 * (2 ** reconnectAttempts));
+        reconnectAttempts += 1;
+        reconnectTimer = setTimeout(async () => {
+            await rejoinSessionSilently();
+            connectWS();
+        }, delay);
+    };
+}
+
+async function sessionExists(id) {
+    try {
+        const res = await fetch(`/workouts/${id}`);
+        return res.ok;
+    } catch {
+        return false;
+    }
+}
+
+async function rejoinSessionSilently() {
+    if (!currentUser || !sessionId) return;
+    await fetch(`/workouts/${sessionId}/join`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ name: currentUser })
+    });
 }
 
 function renderEntry(ex) {
@@ -175,6 +237,12 @@ async function loadGlobalHistory() {
 
 async function endSession() {
     if(!sessionId || !confirm("Archive this workout?")) return;
+    shouldReconnect = false;
+    if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+    }
+    if (socket) socket.close();
     await fetch(`/workouts/${sessionId}`, { method: "DELETE" });
     location.reload(); 
 }
