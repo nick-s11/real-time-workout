@@ -1,3 +1,10 @@
+"""Application factory and FastAPI app setup.
+
+This module defines the FastAPI `app` instance with a lifespan handler
+that initializes and tears down the database. It also mounts the
+single-page frontend and registers the API router.
+"""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,6 +16,10 @@ from workout_app.routers import router as workout_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+	"""FastAPI lifespan context.
+
+	Connects to the database on startup and disposes it on shutdown.
+	"""
 	await database.connect_to_database()
 	try:
 		yield
