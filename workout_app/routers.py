@@ -1,9 +1,3 @@
-"""API router for workout session management and real-time updates.
-
-Provides endpoints to create sessions, join, log exercises, view history,
-archive sessions, and a WebSocket endpoint for live updates.
-"""
-
 import uuid
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -25,11 +19,7 @@ router = APIRouter()
 
 
 def _get_or_create_user(session, name: str) -> User:
-    """Return a `User` with `name`, creating it if necessary.
-
-    Handles concurrent creation by rolling back and re-querying when an
-    integrity error occurs.
-    """
+    
     user = session.exec(select(User).where(User.name == name)).first()
     if user:
         return user
@@ -47,7 +37,6 @@ def _get_or_create_user(session, name: str) -> User:
 
 
 def _participant_names(session, session_id: str) -> list[str]:
-    """Return a sorted list of participant names for `session_id`."""
     statement = (
         select(User.name)
         .join(SessionParticipant, SessionParticipant.user_id == User.id)
@@ -58,10 +47,7 @@ def _participant_names(session, session_id: str) -> list[str]:
 
 
 async def _broadcast(session_id: str, payload: dict):
-    """Send `payload` to all active WebSocket connections for `session_id`.
-
-    Removes connections that fail to receive messages.
-    """
+    
     stale_connections = []
     for conn in connections.get(session_id, []):
         try:
@@ -75,10 +61,7 @@ async def _broadcast(session_id: str, payload: dict):
 
 @router.post("/workouts", status_code=201)
 def create_workout():
-    """Create a new `WorkoutSession` and return its `session_id`.
 
-    Response: `{ "session_id": <id> }` (201)
-    """
     session_id = str(uuid.uuid4())[:8]
     workout = WorkoutSession(session_id=session_id)
     with database.get_session() as session:
@@ -91,11 +74,7 @@ def create_workout():
 
 @router.post("/workouts/{session_id}/join")
 async def join_workout(session_id: str, payload: JoinWorkoutRequest):
-    """Add (or re-add) a participant to a session and broadcast participants.
 
-    Request body: `{ "name": "User" }`.
-    Responses: 200 with session info or 404 if session missing/inactive.
-    """
     with database.get_session() as session:
         db_session = session.get(WorkoutSession, session_id)
         if not db_session or not db_session.active:
@@ -121,10 +100,6 @@ async def join_workout(session_id: str, payload: JoinWorkoutRequest):
 
 @router.get("/workouts/{session_id}")
 def get_workout(session_id: str):
-    """Return session metadata, participants, and recorded exercises.
-
-    Responses: 200 with JSON or 404 if not found.
-    """
     with database.get_session() as session:
         db_session = session.get(WorkoutSession, session_id)
         if not db_session:
@@ -137,7 +112,6 @@ def get_workout(session_id: str):
 
 @router.get("/history")
 def get_all_sessions():
-    """List all workout sessions ordered by creation time (newest first)."""
     with database.get_session() as session:
         sessions = session.exec(select(WorkoutSession).order_by(WorkoutSession.created_at.desc())).all()
     return {"sessions": sessions}
@@ -145,11 +119,7 @@ def get_all_sessions():
 
 @router.post("/workouts/{session_id}/log", status_code=201)
 async def log_exercise(session_id: str, exercise: ExerciseCreate):
-    """Record an exercise for `session_id`, auto-adding participant if needed.
-
-    Broadcasts the new exercise to connected WebSocket clients.
-    Returns the created `Exercise` object (201).
-    """
+    
     participant_added = False
     with database.get_session() as session:
         db_session = session.get(WorkoutSession, session_id)
@@ -182,7 +152,6 @@ async def log_exercise(session_id: str, exercise: ExerciseCreate):
 
 @router.delete("/workouts/{session_id}")
 def archive_workout(session_id: str):
-    """Mark a session inactive and clear live connections."""
     with database.get_session() as session:
         db_session = session.get(WorkoutSession, session_id)
         if not db_session:
@@ -197,12 +166,6 @@ def archive_workout(session_id: str):
 
 @router.websocket("/ws/workout/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    """WebSocket endpoint that joins clients to `session_id` broadcasts.
-
-    Sends the current participant list on connect. The handler keeps the
-    connection open until the client disconnects; disconnections are
-    cleaned up from the `connections` registry.
-    """
     await websocket.accept()
 
     with database.get_session() as session:
