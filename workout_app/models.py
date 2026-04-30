@@ -70,8 +70,6 @@ class ExerciseInDB(ExerciseBase):
 
 
 class Exercise(ExerciseBase, table=True):
-    """Database table for recorded exercises."""
-
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: str
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
